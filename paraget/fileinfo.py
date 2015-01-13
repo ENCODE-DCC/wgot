@@ -5,23 +5,26 @@ from functools import partial
 import errno
 import hashlib
 
-from .utils import find_bucket_key, operate, MD5Error, bytes_print
+from .utils import MD5Error, StreamingBody, bytes_print, date_parser
 
 
 class CreateDirectoryError(Exception):
     pass
 
 
-def save_file(filename, response_data, last_update, is_stream=False):
+def save_file(filename, response, last_update, is_stream=False):
     """
     This writes to the file upon downloading.  It reads the data in the
     response.  Makes a new directory if needed and then writes the
     data to the file.  It also modifies the last modified time to that
     of the S3 object.
     """
-    body = response_data['Body']
-    etag = response_data['ETag'][1:-1]
-    sse = response_data.get('ServerSideEncryption', None)
+    body = StreamingBody(response)
+    etag = response.headers.get('ETag')
+    server = response.headers.get('Server')
+    if server == 'AmazonS3':
+        etag = etag[1:-1]
+    sse = response.headers.get('x-amz-server-side-encryption', None)
     if not is_stream:
         d = os.path.dirname(filename)
         try:
@@ -48,7 +51,7 @@ def save_file(filename, response_data, last_update, is_stream=False):
                 os.remove(filename)
             raise MD5Error(filename)
 
-    if not is_stream:
+    if not is_stream and last_update:
         last_update_tuple = last_update.timetuple()
         mod_timestamp = time.mktime(last_update_tuple)
         os.utime(filename, (int(mod_timestamp), int(mod_timestamp)))
@@ -102,48 +105,35 @@ class FileInfo(object):
     :param parameters: a dictionary of important values this is assigned in
         the ``BasicTask`` object.
     """
-    def __init__(self, src, dest=None, compare_key=None, size=None,
-                 last_update=None, src_type=None, dest_type=None,
-                 operation_name=None, service=None, endpoint=None,
-                 parameters=None, source_endpoint=None, is_stream=False):
-        self.src = src
-        self.src_type = src_type
-        self.operation_name = operation_name
-        self.service = service
-        self.endpoint = endpoint
+    operation_name = 'download'
+    last_update = None
+    size = None
 
+    def __init__(self, session, src, dest=None, size=None, is_stream=False):
+        self.session = session
+        self.src = src
         self.dest = dest
-        self.dest_type = dest_type
-        self.compare_key = compare_key
         self.size = size
-        self.last_update = last_update
-        # Usually inject ``parameters`` from ``BasicTask`` class.
-        if parameters is not None:
-            self.parameters = parameters
-        else:
-            self.parameters = {'acl': None,
-                               'sse': None}
-        self.source_endpoint = source_endpoint
         self.is_stream = is_stream
 
-    def set_size_from_s3(self):
+    def set_info_from_head(self):
         """
         This runs a ``HeadObject`` on the s3 object and sets the size.
         """
-        bucket, key = find_bucket_key(self.src)
-        params = {'endpoint': self.endpoint,
-                  'bucket': bucket,
-                  'key': key}
-        response_data, http = operate(self.service, 'HeadObject', params)
-        self.size = int(response_data['ContentLength'])
+        response = self.session.head(self.src)
+        self.size = int(response.headers['content-length'])
+        last_update = response.headers.get('Last-Modified')
+        if last_update is not None:
+            self.last_update = date_parser(last_update)
 
     def download(self):
         """
         Redirects the file to the multipart download function if the file is
         large.  If it is small enough, it gets the file as an object from s3.
         """
-        bucket, key = find_bucket_key(self.src)
-        params = {'endpoint': self.endpoint, 'bucket': bucket, 'key': key}
-        response_data, http = operate(self.service, 'GetObject', params)
-        save_file(self.dest, response_data, self.last_update,
-                  self.is_stream)
+        response = self.session.get(self.src, stream=True)
+        last_update = response.headers.get('Last-Modified')
+        if last_update is not None:
+            last_update = date_parser(last_update)
+
+        save_file(self.dest, response, last_update, self.is_stream)

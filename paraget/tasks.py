@@ -5,11 +5,10 @@ import socket
 import threading
 
 import requests
-from botocore.exceptions import IncompleteReadError
 
-from .utils import find_bucket_key, MD5Error, \
-    operate, relative_path, IORequest, IOCloseRequest, \
-    PrintTask
+from .utils import MD5Error, \
+    relative_path, IORequest, IOCloseRequest, \
+    IncompleteReadError, StreamingBody, PrintTask
 
 
 LOGGER = logging.getLogger(__name__)
@@ -38,16 +37,8 @@ def print_operation(filename, failed, dryrun=False):
     if failed:
         print_str += " failed"
     print_str += ": "
-    if filename.src_type == "s3":
-        print_str = print_str + "s3://" + filename.src
-    else:
-        print_str += relative_path(filename.src)
-    if filename.operation_name not in ["delete", "make_bucket",
-                                       "remove_bucket"]:
-        if filename.dest_type == "s3":
-            print_str += " to s3://" + filename.dest
-        else:
-            print_str += " to " + relative_path(filename.dest)
+    print_str = print_str + filename.src
+    print_str += " to " + relative_path(filename.dest)
     return print_str
 
 
@@ -63,16 +54,13 @@ class BasicTask(OrderableTask):
     perform its designated operation.
     """
     def __init__(self, session, filename, parameters,
-                 result_queue, payload=None):
+                 result_queue):
         self.session = session
-        self.service = self.session.get_service('s3')
 
         self.filename = filename
-        self.filename.parameters = parameters
 
         self.parameters = parameters
         self.result_queue = result_queue
-        self.payload = payload
 
     def __call__(self):
         self._execute_task(attempts=3)
@@ -85,12 +73,9 @@ class BasicTask(OrderableTask):
                                       error_message=last_error)
             return
         filename = self.filename
-        kwargs = {}
-        if self.payload:
-            kwargs['payload'] = self.payload
         try:
             if not self.parameters['dryrun']:
-                getattr(filename, filename.operation_name)(**kwargs)
+                filename.download()
         except requests.ConnectionError as e:
             connect_error = str(e)
             LOGGER.debug("%s %s failure: %s",
@@ -219,17 +204,16 @@ class DownloadPartTask(OrderableTask):
         range_param = 'bytes=%s-%s' % (start_range, end_range)
         LOGGER.debug("Downloading bytes range of %s for file %s", range_param,
                      self._filename.dest)
-        bucket, key = find_bucket_key(self._filename.src)
-        params = {'endpoint': self._filename.endpoint, 'bucket': bucket,
-                  'key': key, 'range': range_param}
         for i in range(self.TOTAL_ATTEMPTS):
             try:
                 LOGGER.debug("Making GetObject requests with byte range: %s",
                              range_param)
-                response_data, http = operate(self._service, 'GetObject',
-                                              params)
+                response = self.session.get(
+                    self._filename.src,
+                    headers={'Range': range_param},
+                    stream=True)
                 LOGGER.debug("Response received from GetObject")
-                body = response_data['Body']
+                body = StreamingBody(response)
                 self._queue_writes(body)
                 self._context.announce_completed_part(self._part_number)
 

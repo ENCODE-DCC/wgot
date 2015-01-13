@@ -69,7 +69,7 @@ class StablePriorityQueue(queue.Queue):
 
     def _put(self, item):
         priority = min(getattr(item, 'PRIORITY', self.default_priority),
-                        self.default_priority)
+                       self.default_priority)
         self.priorities[priority].append(item)
 
     def _get(self):
@@ -77,33 +77,6 @@ class StablePriorityQueue(queue.Queue):
             if not bucket:
                 continue
             return bucket.popleft()
-
-
-def find_bucket_key(s3_path):
-    """
-    This is a helper function that given an s3 path such that the path is of
-    the form: bucket/key
-    It will return the bucket and the key represented by the s3 path
-    """
-    s3_components = s3_path.split('/')
-    bucket = s3_components[0]
-    s3_key = ""
-    if len(s3_components) > 1:
-        s3_key = '/'.join(s3_components[1:])
-    return bucket, s3_key
-
-
-def split_s3_bucket_key(s3_path):
-    """Split s3 path into bucket and key prefix.
-
-    This will also handle the s3:// prefix.
-
-    :return: Tuple of ('bucketname', 'keyname')
-
-    """
-    if s3_path.startswith('s3://'):
-        s3_path = s3_path[5:]
-    return find_bucket_key(s3_path)
 
 
 def get_file_stat(path):
@@ -118,34 +91,6 @@ def get_file_stat(path):
         raise ValueError('Could not retrieve file stat of "%s": %s' % (
             path, e))
     return stats.st_size, update_time
-
-
-def find_dest_path_comp_key(files, src_path=None):
-    """
-    This is a helper function that determines the destination path and compare
-    key given parameters received from the ``FileFormat`` class.
-    """
-    src = files['src']
-    dest = files['dest']
-    src_type = src['type']
-    dest_type = dest['type']
-    if src_path is None:
-        src_path = src['path']
-
-    sep_table = {'s3': '/', 'local': os.sep}
-
-    if files['dir_op']:
-        rel_path = src_path[len(src['path']):]
-    else:
-        rel_path = src_path.split(sep_table[src_type])[-1]
-    compare_key = rel_path.replace(sep_table[src_type], '/')
-    if files['use_src_name']:
-        dest_path = dest['path']
-        dest_path += rel_path.replace(sep_table[src_type],
-                                      sep_table[dest_type])
-    else:
-        dest_path = dest['path']
-    return dest_path, compare_key
 
 
 def check_etag(etag, fileobj):
@@ -287,12 +232,12 @@ def relative_path(filename, start=os.path.curdir):
         return os.path.abspath(filename)
 
 
-def _date_parser(date_string):
+def date_parser(date_string):
     return parse(date_string).astimezone(tzlocal())
 
 
 class PrintTask(namedtuple('PrintTask',
-                          ['message', 'error', 'total_parts', 'warning'])):
+                           ['message', 'error', 'total_parts', 'warning'])):
     def __new__(cls, message, error=False, total_parts=None, warning=None):
         """
         :param message: An arbitrary string associated with the entry.   This
@@ -310,3 +255,59 @@ IORequest = namedtuple('IORequest',
 # Used to signal that IO for the filename is finished, and that
 # any associated resources may be cleaned up.
 IOCloseRequest = namedtuple('IOCloseRequest', ['filename'])
+
+
+class IncompleteReadError(Exception):
+    """HTTP response did not return expected number of bytes."""
+    fmt = ('{actual_bytes} read, but total bytes '
+           'expected is {expected_bytes}.')
+
+    def __init__(self, **kwargs):
+        msg = self.fmt.format(**kwargs)
+        Exception.__init__(self, msg)
+        self.kwargs = kwargs
+
+
+class StreamingBody(object):
+    """Wrapper class for an http response body.
+
+    This provides a few additional conveniences that do not exist
+    in the urllib3 model:
+
+        * Auto validation of content length, if the amount of bytes
+          we read does not match the content length, an exception
+          is raised.
+
+    """
+    def __init__(self, response):
+        self._raw_stream = response.raw
+        self._content_length = response.headers.get('content-length')
+        self._amount_read = 0
+
+    def read(self, amt=None):
+        chunk = self._raw_stream.read(amt)
+        self._amount_read += len(chunk)
+        if not chunk or amt is None:
+            # If the server sends empty contents or
+            # we ask to read all of the contents, then we know
+            # we need to verify the content length.
+            self._verify_content_length()
+        return chunk
+
+    def _verify_content_length(self):
+        if self._content_length is not None and \
+                self._amount_read != int(self._content_length):
+            raise IncompleteReadError(
+                actual_bytes=self._amount_read,
+                expected_bytes=int(self._content_length))
+
+
+def _validate_content_length(expected_content_length, body_length):
+    # See: https://github.com/kennethreitz/requests/issues/1855
+    # Basically, our http library doesn't do this for us, so we have
+    # to do this ourself.
+    if expected_content_length is not None:
+        if int(expected_content_length) != body_length:
+            raise IncompleteReadError(
+                actual_bytes=body_length,
+                expected_bytes=int(expected_content_length))
