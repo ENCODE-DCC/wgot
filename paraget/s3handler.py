@@ -16,14 +16,14 @@ import math
 import os
 import sys
 
-from awscli.customizations.s3.constants import MULTI_THRESHOLD, CHUNKSIZE, \
+from .constants import MULTI_THRESHOLD, CHUNKSIZE, \
     NUM_THREADS, MAX_UPLOAD_SIZE, MAX_QUEUE_SIZE
-from awscli.customizations.s3.utils import find_chunksize, \
-    operate, find_bucket_key, relative_path, PrintTask, create_warning
-from awscli.customizations.s3.executor import Executor
-from awscli.customizations.s3 import tasks
-from awscli.compat import six
-from awscli.compat import queue
+from .utils import find_chunksize, \
+    relative_path, PrintTask, create_warning
+from .executor import Executor
+from . import tasks
+from .compat import six
+from .compat import queue
 
 
 LOGGER = logging.getLogger(__name__)
@@ -154,18 +154,6 @@ class S3Handler(object):
                 # deleting the file entirely.
                 os.remove(local_filename)
             context.cancel()
-
-    def _cancel_upload(self, upload_id, filename):
-        bucket, key = find_bucket_key(filename.dest)
-        params = {
-            'bucket': bucket,
-            'key': key,
-            'upload_id': upload_id,
-            'endpoint': filename.endpoint,
-        }
-        LOGGER.debug("Aborting multipart upload for: %s", key)
-        response_data, http = operate(
-            filename.service, 'AbortMultipartUpload', params)
 
     def _enqueue_tasks(self, files):
         total_files = 0

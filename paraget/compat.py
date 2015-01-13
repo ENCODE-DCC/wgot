@@ -12,8 +12,7 @@
 # language governing permissions and limitations under the License.
 import sys
 
-from botocore.compat import six
-#import botocore.compat
+import six
 
 # If you ever want to import from the vendored six. Add it here and then
 # import from awscli.compat. Also try to keep it in alphabetical order.

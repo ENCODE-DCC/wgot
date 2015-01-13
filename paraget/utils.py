@@ -10,7 +10,6 @@
 # distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF
 # ANY KIND, either express or implied. See the License for the specific
 # language governing permissions and limitations under the License.
-import argparse
 from datetime import datetime
 import mimetypes
 import hashlib
@@ -22,36 +21,11 @@ from functools import partial
 
 from dateutil.parser import parse
 from dateutil.tz import tzlocal
-from botocore.compat import unquote_str
 
-from awscli.customizations.s3.constants import MAX_PARTS
-from awscli.customizations.s3.constants import MAX_SINGLE_UPLOAD_SIZE
-from awscli.compat import six
-from awscli.compat import PY3
-from awscli.compat import queue
-
-
-class AppendFilter(argparse.Action):
-    """
-    This class is used as an action when parsing the parameters.
-    Specifically it is used for actions corresponding to exclude
-    and include filters.  What it does is that it appends a list
-    consisting of the name of the parameter and its value onto
-    a list containing these [parameter, value] lists.  In this
-    case, the name of the parameter will either be --include or
-    --exclude and the value will be the rule to apply.  This will
-    format all of the rules inputted into the command line
-    in a way compatible with the Filter class.  Note that rules that
-    appear later in the command line take preferance over rulers that
-    appear earlier.
-    """
-    def __call__(self, parser, namespace, values, option_string=None):
-        filter_list = getattr(namespace, self.dest)
-        if filter_list:
-            filter_list.append([option_string, values[0]])
-        else:
-            filter_list = [[option_string, values[0]]]
-        setattr(namespace, self.dest, filter_list)
+from .constants import MAX_PARTS
+from .constants import MAX_SINGLE_UPLOAD_SIZE
+from .compat import PY3
+from .compat import queue
 
 
 class MD5Error(Exception):
@@ -313,125 +287,8 @@ def relative_path(filename, start=os.path.curdir):
         return os.path.abspath(filename)
 
 
-class ReadFileChunk(object):
-    def __init__(self, filename, start_byte, size):
-        self._filename = filename
-        self._start_byte = start_byte
-        self._fileobj = open(self._filename, 'rb')
-        self._size = self._calculate_file_size(self._fileobj, requested_size=size,
-                                               start_byte=start_byte)
-        self._fileobj.seek(self._start_byte)
-        self._amount_read = 0
-
-    def _calculate_file_size(self, fileobj, requested_size, start_byte):
-        actual_file_size = os.fstat(fileobj.fileno()).st_size
-        max_chunk_size = actual_file_size - start_byte
-        return min(max_chunk_size, requested_size)
-
-    def read(self, amount=None):
-        if amount is None:
-            remaining = self._size - self._amount_read
-            data = self._fileobj.read(remaining)
-            self._amount_read += remaining
-            return data
-        else:
-            actual_amount = min(self._size - self._amount_read, amount)
-            data = self._fileobj.read(actual_amount)
-            self._amount_read += actual_amount
-            return data
-
-    def seek(self, where):
-        self._fileobj.seek(self._start_byte + where)
-        self._amount_read = where
-
-    def close(self):
-        self._fileobj.close()
-
-    def tell(self):
-        return self._amount_read
-
-    def __len__(self):
-        # __len__ is defined because requests will try to determine the length
-        # of the stream to set a content length.  In the normal case
-        # of the file it will just stat the file, but we need to change that
-        # behavior.  By providing a __len__, requests will use that instead
-        # of stat'ing the file.
-        return self._size
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *args, **kwargs):
-        self._fileobj.close()
-
-    def __iter__(self):
-        # This is a workaround for http://bugs.python.org/issue17575
-        # Basically httplib will try to iterate over the contents, even
-        # if its a file like object.  This wasn't noticed because we've
-        # already exhausted the stream so iterating over the file immediately
-        # steps, which is what we're simulating here.
-        return iter([])
-
-
 def _date_parser(date_string):
     return parse(date_string).astimezone(tzlocal())
-
-
-class BucketLister(object):
-    """List keys in a bucket."""
-    def __init__(self, operation, endpoint, date_parser=_date_parser):
-        self._operation = operation
-        self._endpoint = endpoint
-        self._date_parser = date_parser
-
-    def list_objects(self, bucket, prefix=None, page_size=None):
-        kwargs = {'bucket': bucket, 'encoding_type': 'url',
-                  'page_size': page_size}
-        if prefix is not None:
-            kwargs['prefix'] = prefix
-        # This event handler is needed because we use encoding_type url and
-        # we're paginating.  The pagination token is the last Key of the
-        # Contents list.  However, botocore does not know that the encoding
-        # type needs to be urldecoded.
-        with ScopedEventHandler(self._operation.session,
-                                'after-call.s3.ListObjects',
-                                self._decode_keys,
-                                'BucketListerDecodeKeys',
-                                True):
-            pages = self._operation.paginate(self._endpoint, **kwargs)
-            for response, page in pages:
-                contents = page.get('Contents', [])
-                for content in contents:
-                    source_path = bucket + '/' + content['Key']
-                    size = content['Size']
-                    last_update = self._date_parser(content['LastModified'])
-                    yield source_path, size, last_update
-
-    def _decode_keys(self, parsed, **kwargs):
-        if 'Contents' in parsed:
-            for content in parsed['Contents']:
-                content['Key'] = unquote_str(content['Key'])
-
-
-class ScopedEventHandler(object):
-    """Register an event callback for the duration of a scope."""
-
-    def __init__(self, session, event_name, handler, unique_id=None,
-                 unique_id_uses_count=False):
-        self._session = session
-        self._event_name = event_name
-        self._handler = handler
-        self._unique_id = unique_id
-        self._unique_id_uses_count = unique_id_uses_count
-
-    def __enter__(self):
-        self._session.register(self._event_name, self._handler, self._unique_id,
-                               self._unique_id_uses_count)
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        self._session.unregister(self._event_name, self._handler,
-                                 self._unique_id,
-                                 self._unique_id_uses_count)
 
 
 class PrintTask(namedtuple('PrintTask',
