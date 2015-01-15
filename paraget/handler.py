@@ -29,7 +29,7 @@ CommandResult = namedtuple('CommandResult',
                            ['num_tasks_failed', 'num_tasks_warned'])
 
 
-class S3Handler(object):
+class Handler(object):
     """
     This class sets up the process to perform the tasks sent to it.  It
     sources the ``self.executor`` from which threads inside the
@@ -190,7 +190,7 @@ class S3Handler(object):
             self.executor.submit(task)
 
 
-class S3StreamHandler(S3Handler):
+class StreamHandler(Handler):
     """
     This class is an alternative ``S3Handler`` to be used when the operation
     involves a stream since the logic is different when uploading and
