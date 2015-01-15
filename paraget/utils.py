@@ -19,8 +19,7 @@ import sys
 from collections import namedtuple, deque
 from functools import partial
 
-from dateutil.parser import parse
-from dateutil.tz import tzlocal
+from email.utils import mktime_tz, parsedate_tz
 
 from .constants import MAX_PARTS
 from .constants import MAX_SINGLE_UPLOAD_SIZE
@@ -233,7 +232,7 @@ def relative_path(filename, start=os.path.curdir):
 
 
 def date_parser(date_string):
-    return parse(date_string).astimezone(tzlocal())
+    return datetime.fromtimestamp(mktime_tz(parsedate_tz(date_string)))
 
 
 class PrintTask(namedtuple('PrintTask',

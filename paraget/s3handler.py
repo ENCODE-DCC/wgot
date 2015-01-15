@@ -14,14 +14,12 @@ from collections import namedtuple
 import logging
 import os
 import requests
-import sys
 
 from .constants import MULTI_THRESHOLD, CHUNKSIZE, \
     NUM_THREADS, MAX_QUEUE_SIZE
 from .utils import find_chunksize, PrintTask
 from .executor import Executor
 from . import tasks
-from .compat import six
 from .compat import queue
 
 
@@ -133,6 +131,7 @@ class S3Handler(object):
         total_parts = 0
         for filename in files:
             num_downloads = 1
+            filename.set_info_from_head(self.session)
             is_multipart_task = self._is_multipart_task(filename)
             if is_multipart_task and not self.params['dryrun']:
                 # If we're in dryrun mode, then we don't need the
@@ -202,49 +201,6 @@ class S3StreamHandler(S3Handler):
     # executor queue and in the threads is limited.
     MAX_EXECUTOR_QUEUE_SIZE = 2
     EXECUTOR_NUM_THREADS = 6
-
-    def _enqueue_tasks(self, files):
-        total_files = 0
-        total_parts = 0
-        for filename in files:
-            num_downloads = 1
-            # Set the file size for the ``FileInfo`` object since
-            # streams do not use a ``FileGenerator`` that usually
-            # determines the size.
-            filename.set_info_from_head(self.session)
-            is_multipart_task = self._is_multipart_task(filename)
-            if is_multipart_task and not self.params['dryrun']:
-                # If we're in dryrun mode, then we don't need the
-                # real multipart tasks.  We can just use a BasicTask
-                # in the else clause below, which will print out the
-                # fact that it's transferring a file rather than
-                # the specific part tasks required to perform the
-                # transfer.
-                num_downloads = self._enqueue_range_download_tasks(filename)
-            else:
-                task = tasks.BasicTask(
-                    session=self.session, filename=filename,
-                    parameters=self.params,
-                    result_queue=self.result_queue)
-                self.executor.submit(task)
-            total_files += 1
-            total_parts += num_downloads
-        return total_files, total_parts
-
-    def _pull_from_stream(self, amount_requested):
-        """
-        This function pulls data from stdin until it hits the amount
-        requested or there is no more left to pull in from stdin.  The
-        function wraps the data into a ``BytesIO`` object that is returned
-        along with a boolean telling whether the amount requested is
-        the amount returned.
-        """
-        stream_filein = sys.stdin
-        if six.PY3:
-            stream_filein = sys.stdin.buffer
-        payload = stream_filein.read(amount_requested)
-        payload_file = six.BytesIO(payload)
-        return payload_file, len(payload) == amount_requested
 
     def _enqueue_range_download_tasks(self, filename):
 
