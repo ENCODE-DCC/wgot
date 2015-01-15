@@ -1,7 +1,6 @@
 import logging
 import os
 import time
-import socket
 import threading
 
 import requests
@@ -171,6 +170,7 @@ class DownloadPartTask(OrderableTask):
 
     # Amount to read from response body at a time.
     ITERATE_CHUNK_SIZE = 1024 * 1024
+    CONNECT_TIMEOUT = 10
     READ_TIMEOUT = 60
     TOTAL_ATTEMPTS = 5
 
@@ -211,7 +211,8 @@ class DownloadPartTask(OrderableTask):
                 response = self.session.get(
                     self._filename.src,
                     headers={'Range': range_param},
-                    stream=True)
+                    stream=True,
+                    timeout=(self.CONNECT_TIMEOUT, self.READ_TIMEOUT))
                 LOGGER.debug("Response received from GetObject")
                 body = StreamingBody(response)
                 self._queue_writes(body)
@@ -224,7 +225,7 @@ class DownloadPartTask(OrderableTask):
                 self._result_queue.put(PrintTask(**result))
                 LOGGER.debug("Task complete: %s", self)
                 return
-            except (socket.timeout, socket.error) as e:
+            except requests.Timeout as e:
                 LOGGER.debug("Socket timeout caught, retrying request, "
                              "(attempt %s / %s)", i, self.TOTAL_ATTEMPTS,
                              exc_info=True)
@@ -241,7 +242,6 @@ class DownloadPartTask(OrderableTask):
         LOGGER.debug("Writing part number %s to file: %s",
                      self._part_number, self._filename.dest)
         iterate_chunk_size = self.ITERATE_CHUNK_SIZE
-        body.set_socket_timeout(self.READ_TIMEOUT)
         if self._filename.is_stream:
             self._queue_writes_for_stream(body)
         else:
