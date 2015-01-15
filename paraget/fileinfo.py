@@ -2,6 +2,7 @@ import os
 import sys
 import time
 from functools import partial
+import binascii
 import errno
 import hashlib
 
@@ -20,11 +21,19 @@ def save_file(filename, response, last_update, is_stream=False):
     of the S3 object.
     """
     body = StreamingBody(response)
-    etag = response.headers.get('ETag')
     server = response.headers.get('Server')
+    md5_hex = None
     if server == 'AmazonS3':
+        etag = response.headers['ETag'][1:-1]
         etag = etag[1:-1]
-    sse = response.headers.get('x-amz-server-side-encryption', None)
+        sse = response.headers.get('x-amz-server-side-encryption', None)
+        if not _is_multipart_etag(etag) and sse != 'aws:kms':
+            md5_hex = etag
+    else:
+        content_md5 = response.headers.get('Content-MD5', None)
+        if content_md5:
+            md5_hex = binascii.hexlify(binascii.a2b_base64(content_md5))
+
     if not is_stream:
         d = os.path.dirname(filename)
         try:
@@ -40,13 +49,13 @@ def save_file(filename, response, last_update, is_stream=False):
         # Need to save the data to be able to check the etag for a stream
         # becuase once the data is written to the stream there is no
         # undoing it.
-        payload = write_to_file(None, etag, md5, file_chunks, True)
+        payload = write_to_file(None, md5_hex, md5, file_chunks, True)
     else:
         with open(filename, 'wb') as out_file:
-            write_to_file(out_file, etag, md5, file_chunks)
+            write_to_file(out_file, md5_hex, md5, file_chunks)
 
-    if not _is_multipart_etag(etag) and sse != 'aws:kms':
-        if etag != md5.hexdigest():
+    if md5_hex:
+        if md5_hex != md5.hexdigest():
             if not is_stream:
                 os.remove(filename)
             raise MD5Error(filename)
@@ -61,7 +70,7 @@ def save_file(filename, response, last_update, is_stream=False):
         sys.stdout.flush()
 
 
-def write_to_file(out_file, etag, md5, file_chunks, is_stream=False):
+def write_to_file(out_file, md5_hex, md5, file_chunks, is_stream=False):
     """
     Updates the etag for each file chunk.  It will write to the file if it a
     file but if it is a stream it will return a byte string to be later
@@ -69,7 +78,7 @@ def write_to_file(out_file, etag, md5, file_chunks, is_stream=False):
     """
     body = b''
     for chunk in file_chunks:
-        if not _is_multipart_etag(etag):
+        if md5_hex:
             md5.update(chunk)
         if is_stream:
             body += chunk
