@@ -13,13 +13,13 @@ if sys.version_info[:2] == (2, 6):
 
 
 setup_options = dict(
-    name='paraget',
+    name='wgot',
     version='0.1',
     description='Peformant parallel http downloading extracted from aws-cli.',
     long_description=open('README.rst').read(),
     author='Laurence Rowe',
     author_email='l@lrowe.co.uk',
-    packages=['paraget'],
+    packages=['wgot'],
     install_requires=requires,
     license="Apache License 2.0",
     classifiers=(
@@ -35,7 +35,7 @@ setup_options = dict(
     ),
     entry_points='''
         [console_scripts]
-        paraget = paraget.command:main
+        wgot = wgot.command:main
     ''',
 )
 

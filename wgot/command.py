@@ -15,17 +15,17 @@ from .compat import (
 )
 
 
-def default_user_agent(name='paraget'):
+def default_user_agent(name='wgot'):
     return '%s/%s %s' % (
         name,
-        pkg_resources.get_distribution('paraget').version,
+        pkg_resources.get_distribution('wgot').version,
         requests.utils.default_user_agent(),
     )
 
 
 def enable_debug_logging():
     logging.basicConfig()
-    logging.getLogger('paraget').setLevel(logging.DEBUG)
+    logging.getLogger('wgot').setLevel(logging.DEBUG)
     requests_log = logging.getLogger("requests.packages.urllib3")
     requests_log.setLevel(logging.DEBUG)
     requests_log.propagate = True
