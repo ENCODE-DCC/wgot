@@ -42,11 +42,7 @@ def run(debug, input_file, max_redirect, output_document, user, password,
 
     session = requests.Session()
     session.headers.update({'User-Agent': user_agent})
-
-    max_redirect_adapter = requests.adapters.HTTPAdapter(
-        max_retries=max_redirect)
-    session.mount('http://', max_redirect_adapter)
-    session.mount('https://', max_redirect_adapter)
+    session.max_redirects = max_redirect
 
     if user is not None:
         assert password is not None
