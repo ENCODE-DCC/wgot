@@ -108,7 +108,7 @@ class FileInfo(object):
     def __init__(self, src, dest=None, size=None, last_update=None,
                  is_stream=False):
         if is_stream:
-            assert dest is not None
+            assert dest is None
         if dest:
             dest = os.path.abspath(dest)
         self.src = src
