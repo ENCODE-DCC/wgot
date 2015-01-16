@@ -37,7 +37,8 @@ def print_operation(filename, failed, dryrun=False):
         print_str += " failed"
     print_str += ": "
     print_str = print_str + filename.src
-    print_str += " to " + relative_path(filename.dest)
+    if not filename.is_stream:
+        print_str += " to " + relative_path(filename.dest)
     return print_str
 
 
@@ -74,7 +75,7 @@ class BasicTask(OrderableTask):
         filename = self.filename
         try:
             if not self.parameters['dryrun']:
-                filename.download()
+                filename.download(self.session)
         except requests.ConnectionError as e:
             connect_error = str(e)
             LOGGER.debug("%s %s failure: %s",

@@ -56,9 +56,6 @@ class Handler(object):
                        'is_stream': False}
         if params:
             self.params.update(params)
-        for key in self.params.keys():
-            if key in params:
-                self.params[key] = params[key]
         self.multi_threshold = multi_threshold
         self.chunksize = chunksize
         self.executor = Executor(

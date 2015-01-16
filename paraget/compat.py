@@ -16,5 +16,9 @@ PY3 = sys.version_info[0] == 3
 
 if PY3:
     import queue
+    from urllib.parse import urlparse
+    import http.client as http_client
 else:
     import Queue as queue
+    from urlparse import urlparse
+    import httplib as http_client

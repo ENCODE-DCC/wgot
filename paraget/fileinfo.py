@@ -1,3 +1,4 @@
+import cgi
 import os
 import sys
 import time
@@ -6,6 +7,7 @@ import binascii
 import errno
 import hashlib
 
+from .compat import urlparse
 from .utils import MD5Error, StreamingBody, bytes_print, date_parser
 
 
@@ -25,7 +27,6 @@ def save_file(filename, response, last_update, is_stream=False):
     md5_hex = None
     if server == 'AmazonS3':
         etag = response.headers['ETag'][1:-1]
-        etag = etag[1:-1]
         sse = response.headers.get('x-amz-server-side-encryption', None)
         if not _is_multipart_etag(etag) and sse != 'aws:kms':
             md5_hex = etag
@@ -93,56 +94,55 @@ def _is_multipart_etag(etag):
 
 class FileInfo(object):
     """
-    This is a child object of the ``TaskInfo`` object.  It can perform more
-    operations such as ``upload``, ``download``, ``copy``, ``delete``,
-    ``move``.  Similiarly to
-    ``TaskInfo`` objects attributes like ``session`` need to be set in order
-    to perform operations.
-
+    :param src: the source url
+    :type src: string
     :param dest: the destination path
     :type dest: string
-    :param compare_key: the name of the file relative to the specified
-        directory/prefix.  This variable is used when performing synching
-        or if the destination file is adopting the source file's name.
-    :type compare_key: string
     :param size: The size of the file in bytes.
     :type size: integer
     :param last_update: the local time of last modification.
     :type last_update: datetime object
-    :param dest_type: if the destination is s3 or local.
-    :param dest_type: string
-    :param parameters: a dictionary of important values this is assigned in
-        the ``BasicTask`` object.
     """
     operation_name = 'download'
-    last_update = None
-    size = None
 
-    def __init__(self, session, src, dest=None, size=None, is_stream=False):
-        self.session = session
+    def __init__(self, src, dest=None, size=None, last_update=None,
+                 is_stream=False):
+        if is_stream:
+            assert dest is not None
+        if dest:
+            dest = os.path.abspath(dest)
         self.src = src
         self.dest = dest
         self.size = size
+        self.last_update = last_update
         self.is_stream = is_stream
 
-    def set_info_from_head(self):
+    def set_info_from_head(self, session):
         """
         This runs a ``HeadObject`` on the s3 object and sets the size.
         """
-        response = self.session.head(self.src)
+        response = session.head(self.src, allow_redirects=True)
         self.size = int(response.headers['content-length'])
         last_update = response.headers.get('Last-Modified')
         if last_update is not None:
             self.last_update = date_parser(last_update)
+        if self.dest is None and not self.is_stream:
+            content_disposition = response.headers.get('Content-Disposition')
+            if content_disposition:
+                type_, kw = cgi.parse_header(content_disposition)
+                self.dest = kw.get('filename')
+            if self.dest is None:
+                self.dest = os.path.basename(urlparse(self.src).path)
+            self.dest = os.path.abspath(self.dest)
 
-    def download(self):
+    def download(self, session):
         """
         Redirects the file to the multipart download function if the file is
         large.  If it is small enough, it gets the file as an object from s3.
         """
-        response = self.session.get(self.src, stream=True)
+        response = session.get(self.src, stream=True)
         last_update = response.headers.get('Last-Modified')
         if last_update is not None:
-            last_update = date_parser(last_update)
+            self.last_update = date_parser(last_update)
 
-        save_file(self.dest, response, last_update, self.is_stream)
+        save_file(self.dest, response, self.last_update, self.is_stream)
