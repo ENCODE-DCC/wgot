@@ -128,7 +128,9 @@ class Handler(object):
         total_parts = 0
         for filename in files:
             num_downloads = 1
-            filename.set_info_from_head(self.session)
+            if filename.size is None:
+                response = self.session.head(filename.src, allow_redirects=True)
+                filename.set_info_from_headers(response)
             is_multipart_task = self._is_multipart_task(filename)
             if is_multipart_task and not self.params['dryrun']:
                 # If we're in dryrun mode, then we don't need the
@@ -182,7 +184,7 @@ class Handler(object):
         for i in range(num_downloads):
             task = tasks.DownloadPartTask(
                 part_number=i, chunk_size=chunksize,
-                result_queue=self.result_queue, service=filename.service,
+                result_queue=self.result_queue, session=self.session,
                 filename=filename, context=context, io_queue=self.write_queue)
             self.executor.submit(task)
 

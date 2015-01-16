@@ -129,18 +129,6 @@ def create_warning(path, error_message):
     return warning_message
 
 
-def operate(service, cmd, kwargs):
-    """
-    A helper function that universally calls any command by taking in the
-    service, name of the command, and any additional parameters required in
-    the call.
-    """
-    operation = service.get_operation(cmd)
-    http_response, response_data = operation.call(**kwargs)
-    check_error(response_data)
-    return response_data, http_response
-
-
 def find_chunksize(size, current_chunksize):
     """
     The purpose of this function is determine a chunksize so that

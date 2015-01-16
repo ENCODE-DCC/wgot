@@ -3,6 +3,7 @@
 EPILOG = __doc__
 
 import logging
+import os.path
 import pkg_resources
 import requests
 import sys
@@ -11,6 +12,7 @@ from .handler import Handler, StreamHandler
 from .compat import (
     PY3,
     http_client,
+    parse_qsl,
     urlparse,
 )
 
@@ -31,6 +33,23 @@ def enable_debug_logging():
     requests_log.propagate = True
     http_client.HTTPConnection.debuglevel = 1
     http_client.HTTPSConnection.debuglevel = 1
+
+
+def info_from_url(src, is_stream=False):
+    """ read data from url, e.g:
+            http://example.com/path.tgz#md5=1234567890abcd;size=1234
+    """
+    parsed = urlparse(src)
+    info = {}
+    info['dest'] = os.path.basename(parsed.path)
+    hash_params = dict(parse_qsl(parsed.fragment))
+    if 'md5' in hash_params:
+        info['md5'] = hash_params['md5']
+    if 'size' in hash_params:
+        info['size'] = int(hash_params['size'])
+    if 'filename' in hash_params:
+        info['dest'] = os.path.basename(hash_params['filename'])
+    return FileInfo(src, is_stream=is_stream, **info)
 
 
 def run(debug, input_file, max_redirect, output_document, user, password,
@@ -73,7 +92,7 @@ def run(debug, input_file, max_redirect, output_document, user, password,
             {'quiet': True, 'is_stream': True}, session=session)
     else:
         handler = Handler({'quiet': quiet}, session=session)
-    fileinfos = [FileInfo(url, is_stream=is_stream) for url in urls]
+    fileinfos = [info_from_url(url, is_stream=is_stream) for url in urls]
     handler.call(fileinfos)
 
 

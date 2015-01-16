@@ -15,7 +15,7 @@ class CreateDirectoryError(Exception):
     pass
 
 
-def save_file(filename, response, last_update, is_stream=False):
+def save_file(filename, response, last_update, md5_hex, is_stream=False):
     """
     This writes to the file upon downloading.  It reads the data in the
     response.  Makes a new directory if needed and then writes the
@@ -23,17 +23,6 @@ def save_file(filename, response, last_update, is_stream=False):
     of the S3 object.
     """
     body = StreamingBody(response)
-    server = response.headers.get('Server')
-    md5_hex = None
-    if server == 'AmazonS3':
-        etag = response.headers['ETag'][1:-1]
-        sse = response.headers.get('x-amz-server-side-encryption', None)
-        if not _is_multipart_etag(etag) and sse != 'aws:kms':
-            md5_hex = etag
-    else:
-        content_md5 = response.headers.get('Content-MD5', None)
-        if content_md5:
-            md5_hex = binascii.hexlify(binascii.a2b_base64(content_md5))
 
     if not is_stream:
         d = os.path.dirname(filename)
@@ -105,27 +94,25 @@ class FileInfo(object):
     """
     operation_name = 'download'
 
-    def __init__(self, src, dest=None, size=None, last_update=None,
+    def __init__(self, src, dest=None, size=None, md5=None, last_update=None,
                  is_stream=False):
-        if is_stream:
-            assert dest is None
         if dest:
             dest = os.path.abspath(dest)
         self.src = src
         self.dest = dest
         self.size = size
+        self.md5 = md5
         self.last_update = last_update
         self.is_stream = is_stream
 
-    def set_info_from_head(self, session):
+    def set_info_from_headers(self, response):
         """
         This runs a ``HeadObject`` on the s3 object and sets the size.
         """
-        response = session.head(self.src, allow_redirects=True)
-        self.size = int(response.headers['content-length'])
-        last_update = response.headers.get('Last-Modified')
-        if last_update is not None:
-            self.last_update = date_parser(last_update)
+        if self.last_update is None:
+            last_update = response.headers.get('Last-Modified')
+            if last_update is not None:
+                self.last_update = date_parser(last_update)
         if self.dest is None and not self.is_stream:
             content_disposition = response.headers.get('Content-Disposition')
             if content_disposition:
@@ -134,6 +121,22 @@ class FileInfo(object):
             if self.dest is None:
                 self.dest = os.path.basename(urlparse(self.src).path)
             self.dest = os.path.abspath(self.dest)
+        if self.md5 is None:
+            server = response.headers.get('Server')
+            if server == 'AmazonS3':
+                etag = response.headers['ETag'][1:-1]
+                sse = response.headers.get('x-amz-server-side-encryption', None)
+                if not _is_multipart_etag(etag) and sse != 'aws:kms':
+                    self.md5 = etag
+            elif 'Range' not in response.request.headers:
+                content_md5 = response.headers.get('Content-MD5', None)
+                if content_md5:
+                    self.md5 = binascii.hexlify(binascii.a2b_base64(content_md5))
+        if self.size is None:
+            if 'Range' not in response.request.headers:
+                content_length = response.headers.get('Content-Length')
+                if content_length is not None:
+                    self.size = int(content_length)
 
     def download(self, session):
         """
@@ -141,8 +144,5 @@ class FileInfo(object):
         large.  If it is small enough, it gets the file as an object from s3.
         """
         response = session.get(self.src, stream=True)
-        last_update = response.headers.get('Last-Modified')
-        if last_update is not None:
-            self.last_update = date_parser(last_update)
-
-        save_file(self.dest, response, self.last_update, self.is_stream)
+        self.set_info_from_headers(response)
+        save_file(self.dest, response, self.last_update, self.md5, self.is_stream)

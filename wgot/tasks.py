@@ -150,9 +150,10 @@ class CompleteDownloadTask(OrderableTask):
         # 3) Queue an IO request to the IO thread letting it know we're
         #    done with the file.
         self._context.wait_for_completion()
-        last_update_tuple = self._filename.last_update.timetuple()
-        mod_timestamp = time.mktime(last_update_tuple)
-        os.utime(self._filename.dest, (int(mod_timestamp), int(mod_timestamp)))
+        if self._filename.last_update:
+            last_update_tuple = self._filename.last_update.timetuple()
+            mod_timestamp = time.mktime(last_update_tuple)
+            os.utime(self._filename.dest, (int(mod_timestamp), int(mod_timestamp)))
         message = print_operation(self._filename, False,
                                   self._parameters['dryrun'])
         print_task = {'message': message, 'error': False}
@@ -175,13 +176,13 @@ class DownloadPartTask(OrderableTask):
     READ_TIMEOUT = 60
     TOTAL_ATTEMPTS = 5
 
-    def __init__(self, part_number, chunk_size, result_queue, service,
+    def __init__(self, part_number, chunk_size, result_queue, session,
                  filename, context, io_queue):
         self._part_number = part_number
         self._chunk_size = chunk_size
         self._result_queue = result_queue
         self._filename = filename
-        self._service = filename.service
+        self.session = session
         self._context = context
         self._io_queue = io_queue
 
@@ -215,6 +216,7 @@ class DownloadPartTask(OrderableTask):
                     stream=True,
                     timeout=(self.CONNECT_TIMEOUT, self.READ_TIMEOUT))
                 LOGGER.debug("Response received from GetObject")
+                self._filename.set_info_from_headers(response)
                 body = StreamingBody(response)
                 self._queue_writes(body)
                 self._context.announce_completed_part(self._part_number)
