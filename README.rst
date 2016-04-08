@@ -9,7 +9,7 @@ Installation
 
 2. run the following commands:
 
-(a) python setup.py build
+- python setup.py build
 
-(b) sudo python setup.py install
+- sudo python setup.py install
 
