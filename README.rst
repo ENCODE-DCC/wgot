@@ -5,7 +5,8 @@ Peformant parallel GET extracted from aws-cli.
 
 Installation
 ============
-
-python setup.py build
-sudo python setup.py install
+1. cd into the folder "wgot"
+2. run the following commands:
+(a) python setup.py build
+(b) sudo python setup.py install
 
